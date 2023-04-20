@@ -1,0 +1,91 @@
+variant: fcos
+version: 1.4.0
+systemd:
+  units:
+    # Installing qemu-guest-agent as a layered package with rpm-ostree
+    - name: qemu-guest-agent-install.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Layer qemu-guest-agent with rpm-ostree
+        Wants=network-online.target
+        After=network-online.target
+        # We run before `zincati.service` to avoid conflicting rpm-ostree
+        # transactions.
+        Before=zincati.service
+        ConditionPathExists=!/var/lib/%N.stamp
+
+        [Service]
+        Type=oneshot
+        RemainAfterExit=yes
+        # `--allow-inactive` ensures that rpm-ostree does not return an error
+        # if the package is already installed. This is useful if the package is
+        # added to the root image in a future Fedora CoreOS release as it will
+        # prevent the service from failing.
+        ExecStart=/usr/bin/rpm-ostree install --apply-live --allow-inactive qemu-guest-agent
+        ExecStart=/bin/touch /var/lib/%N.stamp
+        ExecStartPost=/usr/bin/systemctl enable --now qemu-guest-agent
+
+        [Install]
+        WantedBy=multi-user.target
+storage:
+  files:
+    - path: /etc/hostname
+      mode: 0644
+      contents:
+        inline: ${node_hostname}
+    - path: /etc/NetworkManager/system-connections/wired.nmconnection
+      mode: 0600
+      contents:
+        inline: |
+          [connection]
+          id=wired
+          type=ethernet
+          autoconnect-priority=-999
+          interface-name=ens18
+          
+          [ethernet]
+          
+          [ipv4]
+          address1=${node_ip}/24,192.168.31.1
+          dns=192.168.31.1;8.8.8.8;
+          may-fail=false
+          method=manual
+          
+          [ipv6]
+          addr-gen-mode=stable-privacy
+          method=auto
+    # CRI-O DNF module
+    - path: /etc/dnf/modules.d/cri-o.module
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: |
+          [cri-o]
+          name=cri-o
+          stream=1.17
+          profiles=
+          state=enabled
+    # configuring automatic loading of br_netfilter on startup
+    - path: /etc/modules-load.d/br_netfilter.conf
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: br_netfilter
+    # setting kernel parameters required by kubelet
+    - path: /etc/sysctl.d/kubernetes.conf
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: |
+          net.bridge.bridge-nf-call-iptables=1
+          net.ipv4.ip_forward=1
+passwd: # setting login credentials
+  groups:
+    - name: homeuser
+      gid: 1000
+  users:
+    - name: core
+      uid: 1000
+      ssh_authorized_keys:
+        - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCoPJQAHkfSRIfS05ptesdKwTX7ererHcTZ7pKWi7yUqOQv1e2xpfNBcfx/trwzITJe9N7bwp7t6gpPY2/yBr8F6TenigFWhDaF3Qi9kdSlv64eOsPv6iTg0URH7RE4RQwdArPuwAEBA79BOVoJ0qG/zgn0LOlqYGE/EameYxtgzDJNjXPWOi6OkPKhOEc00+wWGucsCw/8a6rzaMbQHn647yiS7XUJ9/QgMwZ5tqT+Fw/1dxzV4zrWK5MVEXlN5wRZEzukadPQJKyZhhhx3o7MqEVOsTHvyBln6NVJGFawQY7B+ffN/+9n6pEuskWCqngywqAvDXyRS7zD/Dxqv5pjzSQI2fkyuM21oRcKlSYx2AB4L46J6MRJ4ZLA5dhY0fwv868F5VFmJZ2AsDmaGFCqdXTMCv6VRnghJo75oybv+/eoV53NETrTeB4XsPOxSZOHmK93zJzGw2hT4X/ZTvyVbnCyU+Z4sg2iU8ZVE3pHJi8ZQ3hadW0N+CAAmVQ+zsE= nousername

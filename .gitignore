@@ -1,0 +1,8 @@
+output/
+
+.terraform
+.terraform.*
+*.tfstate
+*.tfstate.*
+credentials.auto.tfvars
+*.log
